@@ -54,4 +54,19 @@ if file:
 
         # Gráfico de distribución
         conteo = df_f['Nombre HW'].value_counts().reset_index()
-        conteo.columns = ['Hardware', '
+        conteo.columns = ['Hardware', 'Cantidad']
+        st.plotly_chart(px.bar(conteo.head(20), x='Cantidad', y='Hardware', orientation='h', color='Cantidad'), use_container_width=True)
+
+        # Tabla de visualización
+        cols_show = ['NEName', 'Nombre HW', 'Board Name', 'Inventory Unit ID', 'SN(Bar Code)']
+        valid_cols = [c for c in cols_show if c in df_f.columns]
+        st.dataframe(df_f[valid_cols], use_container_width=True)
+
+        # Exportar a Excel (Solo el detalle visible)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df_f[valid_cols].to_excel(writer, index=False, sheet_name='Detalle')
+        st.download_button("📥 Descargar Detalle Traducido", output.getvalue(), file_name="Inventario_Traducido.xlsx")
+
+    except Exception as e:
+        st.error(f"Error: {e}")
