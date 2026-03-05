@@ -39,7 +39,7 @@ HW_MAP = {
 CLEAN_MAP = {str(k).strip().lstrip('0'): v for k, v in HW_MAP.items()}
 
 st.set_page_config(page_title="Inventario Cloud Final", layout="wide")
-st.title("📊 Auditoría de Hardware - Diccionario Completo")
+st.title("📊 Hardware Huawei RED")
 
 file = st.file_uploader("Sube el archivo CSV", type=["csv"])
 
@@ -88,3 +88,4 @@ if file:
 
     except Exception as e:
         st.error(f"Error: {e}")
+
