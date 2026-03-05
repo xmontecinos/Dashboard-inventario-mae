@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import io
-import re
 
-# 1. DICCIONARIO MAESTRO AMPLIADO (Basado en tus imágenes)
+# 1. DICCIONARIO MAESTRO AMPLIADO (Basado en tus reportes)
 HW_MAP = {
     "3059609": "UMPTga3", "3059607": "UMPTga2", "3058543": "UMPTg3",
     "3058626": "UBBPg2", "3058627": "UBBPg3", "3058707": "UBBPg2a",
@@ -19,7 +18,7 @@ HW_MAP = {
     "02312TNN": "AAU5339w", "02312VNR": "RHUB5963e", "02314MUJ": "pRRU5633GR",
     "02313AAR": "HAAU5222", "02314RER": "AAU5942", "02312VCW": "AAU5942",
     "02314TCS": "AAU5736", "02312QYQ": "AAU5639w",
-    # SFPs (Códigos de 8 dígitos)
+    # SFPs 
     "34060599": "10300Mb/s-1310nm-10km", "34060713": "10300Mb/s-1310nm-1km",
     "34061940": "25750Mb/s-1310nm-0.3km", "34060290": "1300Mb/s-1310nm-10km",
     "34060473": "1300Mb/s-1310nm-10km", "34060742": "10300Mb/s-1310nm-10km",
@@ -31,50 +30,73 @@ HW_MAP = {
     "02313BJH": "10300Mb/s-1310nm-10km", "2315200": "1200Mb/s-1310nm-10km"
 }
 
-# Limpieza preventiva del diccionario (quita ceros y espacios de las llaves)
+# Limpieza automática del diccionario para asegurar cruce sin errores de ceros
 CLEAN_MAP = {str(k).strip().lstrip('0'): v for k, v in HW_MAP.items()}
 
-st.set_page_config(page_title="Auditoría HW Cloud", layout="wide")
-st.title("📊 Inventario de Hardware de Red")
+st.set_page_config(page_title="Inventario Cloud", layout="wide")
+st.title("📊 Auditoría de Inventario de Red")
 
-file = st.file_uploader("Sube el archivo CSV de inventario", type=["csv"])
+file = st.file_uploader("Sube el archivo CSV Inventory_Board", type=["csv"])
 
 if file:
     try:
+        # Carga de datos con codificación flexible
         df = pd.read_csv(file, encoding='latin-1', sep=None, engine='python', dtype=str)
         df.columns = df.columns.str.strip()
 
         if 'PN(BOM Code/Item)' in df.columns:
-            # NORMALIZACIÓN: Quita ceros a la izquierda, espacios y guiones finales
-            df['PN_Clean'] = df['PN(BOM Code/Item)'].str.split('-').str[0] # Quita sufijos como -001
+            # Normalización de Part Numbers del archivo
+            df['PN_Clean'] = df['PN(BOM Code/Item)'].str.split('-').str[0] # Elimina sufijos -001, etc.
             df['PN_Clean'] = df['PN_Clean'].str.strip().str.lstrip('0')
             
-            # Asignación del nombre usando el mapa limpio
+            # Cruce de datos: si no existe en el mapa, muestra el PN original
             df['Nombre HW'] = df['PN_Clean'].map(CLEAN_MAP).fillna("PN: " + df['PN(BOM Code/Item)'])
 
-        # Filtro de Sitio
-        sitios = sorted(df['NEName'].unique().tolist())
-        sitio_sel = st.selectbox("📍 Seleccionar Sitio:", ["Todos"] + sitios)
+        # Filtro de Sitio interactivo
+        sitio_sel = st.selectbox("📍 Filtrar por Sitio (NEName):", ["Todos"] + sorted(df['NEName'].unique().tolist()))
         df_f = df if sitio_sel == "Todos" else df[df['NEName'] == sitio_sel]
 
-        # Gráfica de Barras
-        st.subheader(f"Resumen de Equipos en {sitio_sel}")
+        # Gráfica de distribución
+        st.subheader(f"Distribución de Hardware en {sitio_sel}")
         resumen = df_f['Nombre HW'].value_counts().reset_index()
         resumen.columns = ['Hardware', 'Cantidad']
         fig = px.bar(resumen.head(20), x='Cantidad', y='Hardware', orientation='h', color='Cantidad', color_continuous_scale='Turbo')
         st.plotly_chart(fig, use_container_width=True)
 
-        # Tabla de Datos con Inventory Unit ID
-        st.subheader("📋 Detalle Completo")
-        columnas_ver = ['NEName', 'Nombre HW', 'Board Name', 'Inventory Unit ID', 'Subrack No.', 'Slot No.', 'SN(Bar Code)']
-        cols_finales = [c for c in columnas_ver if c in df_f.columns]
+        # --- SECCIÓN DE TABLA (Detalle del cuadro) ---
+        st.subheader("📋 Detalle de Equipos Seleccionados")
+        columnas_cuadro = [
+            'NEName', 
+            'Nombre HW', 
+            'Board Name', 
+            'Inventory Unit ID', 
+            'Subrack No.', 
+            'Slot No.',
+            'SN(Bar Code)'
+        ]
+        
+        # Filtramos columnas que realmente existan en el archivo subido
+        cols_finales = [c for c in columnas_cuadro if c in df_f.columns]
         st.dataframe(df_f[cols_finales], use_container_width=True)
 
-        # Exportar a Excel
+        # --- SECCIÓN DE DESCARGA (Solo el detalle del cuadro) ---
+        df_excel = df_f[cols_finales]
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_f.to_excel(writer, index=False, sheet_name='Inventario')
-        st.download_button("📥 Descargar Excel", output.getvalue(), file_name=f"Inventario_{sitio_sel}.xlsx")
+            df_excel.to_excel(writer, index=False, sheet_name='Inventario_Filtrado')
+            
+            # Ajuste automático de ancho de columnas en Excel
+            worksheet = writer.sheets['Inventario_Filtrado']
+            for i, col in enumerate(df_excel.columns):
+                column_len = max(df_excel[col].astype(str).map(len).max(), len(col)) + 2
+                worksheet.set_column(i, i, column_len)
+
+        st.download_button(
+            label="📥 Descargar Excel (Solo lo que muestra el cuadro)",
+            data=output.getvalue(),
+            file_name=f"Inventario_{sitio_sel}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     except Exception as e:
-        st.error(f"Error al procesar: {e}")
+        st.error(f"Se produjo un error al procesar el archivo: {e}")
