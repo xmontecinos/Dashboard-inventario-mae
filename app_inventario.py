@@ -4,7 +4,7 @@ import plotly.express as px
 import io
 import re
 
-# 1. DICCIONARIO MAESTRO AMPLIADO
+# 1. DICCIONARIO MAESTRO AMPLIADO (Basado en tus reportes anteriores)
 HW_MAP = {
     "3059609": "UMPTga3", "3059607": "UMPTga2", "3058543": "UMPTg3",
     "3058626": "UBBPg2", "3058627": "UBBPg3", "3058707": "UBBPg2a",
@@ -21,7 +21,7 @@ HW_MAP = {
 CLEAN_MAP = {str(k).strip().upper().lstrip('0'): v for k, v in HW_MAP.items()}
 
 st.set_page_config(page_title="Inventario Red Final", layout="wide")
-st.title("📊 Auditoría de Hardware (Detalle Completo)")
+st.title("📊 Auditoría de Hardware (Mapeo Inteligente)")
 
 file = st.file_uploader("Sube el archivo CSV de Inventario", type=["csv"])
 
@@ -34,15 +34,28 @@ if file:
         df['Board Name'] = df['Board Name'].fillna('').astype(str)
         df_f = df[~df['Board Name'].str.contains("AC|DC|PWR|POWER|PMU|ETP|DCDU", case=False, na=False)].copy()
 
-        # 2. MOTOR DE TRADUCCIÓN
+        # 2. MOTOR DE TRADUCCIÓN REFORZADO
         def traducir_hardware(row):
             pn_raw = str(row.get('PN(BOM Code/Item)', '')).strip().upper()
+            board = str(row.get('Board Name', '')).upper()
+            
+            # Limpiar PN: quitar sufijos (-001) y ceros iniciales
             pn_base = re.split(r'[- ]', pn_raw)[0]
             pn_match = re.sub(r'[^A-Z0-9]', '', pn_base).lstrip('0')
+            
+            # A. Buscar en el diccionario
             if pn_match in CLEAN_MAP:
                 return CLEAN_MAP[pn_match]
+            
+            # B. AUTO-DETECCIÓN: Si el código empieza con 3406 es casi seguro un SFP
             if pn_match.startswith("3406"):
                 return f"SFP Genérico ({pn_raw})"
+            
+            # C. AUTO-DETECCIÓN POR NOMBRE: Si el nombre de la placa tiene pistas
+            if "RRU" in board: return f"Radio RRU ({pn_raw})"
+            if "AAU" in board: return f"Antena AAU ({pn_raw})"
+            if "UBBP" in board: return f"Banda Base UBBP ({pn_raw})"
+            
             return f"PN: {pn_raw}"
 
         df_f['Nombre HW'] = df_f.apply(traducir_hardware, axis=1)
@@ -56,33 +69,17 @@ if file:
         conteo.columns = ['Hardware', 'Cantidad']
         st.plotly_chart(px.bar(conteo, x='Cantidad', y='Hardware', orientation='h', color='Cantidad'), use_container_width=True)
 
-        # --- TABLA DE DETALLE (Con Subrack y Slot recuperados) ---
+        # 4. TABLA DE DETALLE (Con Subrack y Slot)
         st.subheader("📋 Detalle de Equipos Seleccionados")
-        cols_mostrar = [
-            'NEName', 
-            'Nombre HW', 
-            'Board Name', 
-            'Inventory Unit ID', 
-            'Subrack No.', 
-            'Slot No.', 
-            'SN(Bar Code)'
-        ]
-        
-        # Filtramos solo las que existan en el archivo para evitar errores
+        cols_mostrar = ['NEName', 'Nombre HW', 'Board Name', 'Inventory Unit ID', 'Subrack No.', 'Slot No.', 'SN(Bar Code)']
         cols_finales = [c for c in cols_mostrar if c in df_final.columns]
         st.dataframe(df_final[cols_finales], use_container_width=True)
 
-        # --- BOTÓN EXCEL (Solo el detalle del cuadro) ---
+        # 5. BOTÓN EXCEL
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df_final[cols_finales].to_excel(writer, index=False, sheet_name='Inventario')
-        
-        st.download_button(
-            label="📥 Descargar Excel del Cuadro", 
-            data=output.getvalue(), 
-            file_name=f"Inventario_{sitio_sel}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("📥 Descargar Excel", output.getvalue(), file_name=f"Inventario_{sitio_sel}.xlsx")
 
     except Exception as e:
-        st.error(f"Error en el proceso: {e}")
+        st.error(f"Error: {e}")
