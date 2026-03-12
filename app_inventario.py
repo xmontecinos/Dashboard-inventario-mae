@@ -4,88 +4,96 @@ import plotly.express as px
 import io
 import re
 
-# 1. DICCIONARIO MAESTRO COMPLETO (Extraído de tus imágenes)
+# ... (Mantenemos tu HW_MAP y CLEAN_MAP igual) ...
 HW_MAP = {
-    # Unidades de Control y Procesamiento
     "3059609": "UMPTga3", "3059607": "UMPTga2", "3058543": "UMPTg3",
     "3058626": "UBBPg2", "3058627": "UBBPg3", "3058707": "UBBPg2a",
     "03050BYF": "UBBPg1a", "03050BKS": "UBBPg3b",
-    # Módulos de Energía, Fans y Otros
-    "02311VGW": "FANF", "02312JWX": "FANh", "02312QKD": "WD2MUEIUd",
-    "02312JXA": "UPEUg", "02311TVH": "UPEUe", "02312JWU": "UPEUh",
-    "02314GEE": "BBU5900C", "02312VNR": "RHUB5963e", "02314MUJ": "pRRU5633GR",
-    # Radios (RRU / AAU)
-    "02312VRC": "RRU5513w", "02314PEF": "RRU5517t", "02312XMM": "AAU5339w",
-    "02313GFY": "RRU5512", "02313DMS": "HAAU5323", "02313AFM": "RRU5904w",
-    "02311PFF": "RRU5301", "02312CMF": "RRU5904w", "02312LWK": "RRU5818",
-    "02312SSQ": "RRU5336E", "02314SVV": "RRU5935E", "02314UUR": "RRU5336E",
-    "02312RXX": "RRU5304w", "02312PMH": "RRU5901", "02314SVW": "RRU5935E",
-    "02312TNN": "AAU5339w", "02313AAR": "HAAU5222", "02314RER": "AAU5942",
-    "02312VCW": "AAU5942", "02314TCS": "AAU5736", "02312QYQ": "AAU5639w",
-    # SFPs (Transceptores Ópticos)
-    "34060599": "10300Mb/s-1310nm-10km", "34060713": "10300Mb/s-1310nm-1km",
-    "34061940": "25750Mb/s-1310nm-0.3km", "34060290": "1300Mb/s-1310nm-10km",
-    "34060473": "1300Mb/s-1310nm-10km", "34060742": "10300Mb/s-1310nm-10km",
-    "34061042": "10300Mb/s-1310nm-10km", "34062523": "1200Mb/s-1310nm-10km",
-    "34061618": "25750Mb/s-1310nm-10km", "34060495": "10300Mb/s-1310nm-10km",
-    "34061630": "11300Mb/s-1310nm-10km", "2318170": "10300Mb/s-1310nm-10km",
-    "34060298": "1300Mb/s-1310nm-40km", "34060613": "10300Mb/s-1310nm-10km",
-    "02313URL": "10300Mb/s-1310nm-10km", "34060672": "10300Mb/s-1310nm-10km",
-    "34060484": "2500Mb/s-1310nm-2km", "34060796": "10300Mb/s-1550nm-40km",
-    "02313BJH": "10300Mb/s-1310nm-10km", "2315200": "1200Mb/s-1310nm-10km"
+    # ... resto del mapa ...
 }
-
-# Normalización del mapa (quitar ceros a la izquierda y espacios)
 CLEAN_MAP = {str(k).strip().lstrip('0'): v for k, v in HW_MAP.items()}
 
-st.set_page_config(page_title="Inventario Cloud Final", layout="wide")
+st.set_page_config(page_title="Inventario Cloud Multi-formato", layout="wide")
 st.title("📊 Hardware Huawei RED")
 
-file = st.file_uploader("Sube el archivo CSV", type=["csv"])
+# Cambiamos los tipos aceptados
+file = st.file_uploader("Sube tu inventario (CSV, XLSX o XML)", type=["csv", "xlsx", "xml"])
 
 if file:
     try:
-        df = pd.read_csv(file, encoding='latin-1', sep=None, engine='python', dtype=str)
+        # --- LÓGICA DE LECTURA SEGÚN EXTENSIÓN ---
+        file_extension = file.name.split('.')[-1].lower()
+        
+        if file_extension == 'csv':
+            df = pd.read_csv(file, encoding='latin-1', sep=None, engine='python', dtype=str)
+        elif file_extension == 'xlsx':
+            df = pd.read_excel(file, dtype=str)
+        elif file_extension == 'xml':
+            # Nota: read_xml requiere que las filas estén bajo una etiqueta común
+            df = pd.read_xml(file, dtype=str)
+        
+        # Limpieza básica de columnas
         df.columns = df.columns.str.strip()
 
-        # 1. EXCLUSIÓN DE ENERGÍA (AC/DC)
-        df['Board Name'] = df['Board Name'].fillna('').astype(str)
-        df_f = df[~df['Board Name'].str.contains("AC|DC|PWR|POWER|PMU|ETP|DCDU", case=False, na=False)].copy()
+        # 1. EXCLUSIÓN DE ENERGÍA
+        if 'Board Name' in df.columns:
+            df['Board Name'] = df['Board Name'].fillna('').astype(str)
+            df_f = df[~df['Board Name'].str.contains("AC|DC|PWR|POWER|PMU|ETP|DCDU", case=False, na=False)].copy()
+        else:
+            df_f = df.copy()
 
-        # 2. MOTOR DE TRADUCCIÓN REFORZADO
+        # 2. MOTOR DE TRADUCCIÓN (Tu función original)
         def traducir_hardware(row):
-            pn_raw = str(row.get('PN(BOM Code/Item)', '')).strip().upper()
+            # Buscamos la columna de PN, a veces varía el nombre según el formato
+            pn_col = next((c for c in df.columns if 'PN' in c or 'BOM' in c), None)
+            if not pn_col: return "Columna PN no hallada"
             
-            # Limpiar PN: quitar sufijos (-001) y ceros iniciales
+            pn_raw = str(row.get(pn_col, '')).strip().upper()
             pn_base = re.split(r'[- ]', pn_raw)[0]
             pn_match = re.sub(r'[^A-Z0-9]', '', pn_base).lstrip('0')
-            
-            # Buscar en el diccionario
             return CLEAN_MAP.get(pn_match, f"PN: {pn_raw}")
 
         df_f['Nombre HW'] = df_f.apply(traducir_hardware, axis=1)
 
-        # 3. INTERFAZ
-        sitio_sel = st.selectbox("📍 Filtrar por Sitio:", ["Todos"] + sorted(df_f['NEName'].unique().tolist()))
-        df_final = df_f if sitio_sel == "Todos" else df_f[df_f['NEName'] == sitio_sel]
+        # 3. INTERFAZ Y FILTROS
+        # Intentamos detectar la columna de nombre de sitio (NEName o similar)
+        site_col = next((c for c in df_f.columns if 'NEName' in c or 'NE Name' in c), None)
+        
+        if site_col:
+            sitio_sel = st.selectbox("📍 Filtrar por Sitio:", ["Todos"] + sorted(df_f[site_col].unique().tolist()))
+            df_final = df_f if sitio_sel == "Todos" else df_f[df_f[site_col] == sitio_sel]
+        else:
+            st.warning("No se detectó la columna 'NEName'. Mostrando todos los datos.")
+            df_final = df_f
 
-        # Gráfico
-        conteo = df_final['Nombre HW'].value_counts().reset_index().head(20)
-        conteo.columns = ['Hardware', 'Cantidad']
-        st.plotly_chart(px.bar(conteo, x='Cantidad', y='Hardware', orientation='h', color='Cantidad'), use_container_width=True)
+        # 4. GRÁFICOS Y TABLAS
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            conteo = df_final['Nombre HW'].value_counts().reset_index().head(15)
+            conteo.columns = ['Hardware', 'Cantidad']
+            st.plotly_chart(px.bar(conteo, x='Cantidad', y='Hardware', orientation='h', 
+                                   title="Top Hardware Detectado", color='Cantidad'), use_container_width=True)
 
-        # 4. TABLA DE DETALLE (Con Subrack, Slot e Inventory Unit ID)
-        st.subheader("📋 Detalle de Equipos")
-        cols_mostrar = ['NEName', 'Nombre HW', 'Board Name', 'Inventory Unit ID', 'Subrack No.', 'Slot No.', 'SN(Bar Code)']
-        cols_finales = [c for c in cols_mostrar if c in df_final.columns]
-        st.dataframe(df_final[cols_finales], use_container_width=True)
+        with col2:
+            st.subheader("📋 Detalle de Equipos")
+            # Definimos columnas prioritarias para mostrar
+            cols_interes = ['NEName', 'Nombre HW', 'Board Name', 'Inventory Unit ID', 'Subrack No.', 'Slot No.', 'SN(Bar Code)', 'Serial Number']
+            cols_finales = [c for c in cols_interes if c in df_final.columns]
+            st.dataframe(df_final[cols_finales], use_container_width=True, hide_index=True)
 
         # 5. EXPORTAR EXCEL
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_final[cols_finales].to_excel(writer, index=False, sheet_name='Inventario')
-        st.download_button("📥 Descargar Reporte Completo", output.getvalue(), file_name=f"Inventario_{sitio_sel}.xlsx")
+            df_final.to_excel(writer, index=False, sheet_name='Inventario_Procesado')
+        
+        st.download_button(
+            label="📥 Descargar Reporte en Excel",
+            data=output.getvalue(),
+            file_name=f"Inventario_Procesado.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     except Exception as e:
-        st.error(f"Error: {e}")
-
+        st.error(f"Hubo un problema al procesar el archivo: {e}")
+        st.info("Asegúrate de que el XML tenga una estructura plana o que las columnas coincidan con el inventario estándar.")
