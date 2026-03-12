@@ -4,25 +4,55 @@ import plotly.express as px
 import io
 import re
 
-# 1. DICCIONARIO MAESTRO (Simplificado para el ejemplo, mantén el tuyo completo)
+# 1. DICCIONARIO MAESTRO
 HW_MAP = {
+    # Unidades de Control y Procesamiento
     "3059609": "UMPTga3", "3059607": "UMPTga2", "3058543": "UMPTg3",
     "3058626": "UBBPg2", "3058627": "UBBPg3", "3058707": "UBBPg2a",
     "03050BYF": "UBBPg1a", "03050BKS": "UBBPg3b",
-    "02312VRC": "RRU5513w", "02314PEF": "RRU5517t", "02312XMM": "AAU5339w"
+    # Módulos de Energía, Fans y Otros
+    "02311VGW": "FANF", "02312JWX": "FANh", "02312QKD": "WD2MUEIUd",
+    "02312JXA": "UPEUg", "02311TVH": "UPEUe", "02312JWU": "UPEUh",
+    "02314GEE": "BBU5900C", "02312VNR": "RHUB5963e", "02314MUJ": "pRRU5633GR",
+    # Radios (RRU / AAU)
+    "02312VRC": "RRU5513w", "02314PEF": "RRU5517t", "02312XMM": "AAU5339w",
+    "02313GFY": "RRU5512", "02313DMS": "HAAU5323", "02313AFM": "RRU5904w",
+    "02311PFF": "RRU5301", "02312CMF": "RRU5904w", "02312LWK": "RRU5818",
+    "02312SSQ": "RRU5336E", "02314SVV": "RRU5935E", "02314UUR": "RRU5336E",
+    "02312RXX": "RRU5304w", "02312PMH": "RRU5901", "02314SVW": "RRU5935E",
+    "02312TNN": "AAU5339w", "02313AAR": "HAAU5222", "02314RER": "AAU5942",
+    "02312VCW": "AAU5942", "02314TCS": "AAU5736", "02312QYQ": "AAU5639w",
+    # SFPs (Transceptores Ópticos)
+    "34060599": "10300Mb/s-1310nm-10km", "34060713": "10300Mb/s-1310nm-1km",
+    "34061940": "25750Mb/s-1310nm-0.3km", "34060290": "1300Mb/s-1310nm-10km",
+    "34061618": "25750Mb/s-1310nm-10km", "34061630": "11300Mb/s-1310nm-10km"
 }
 
-CLEAN_MAP = {str(k).strip().lstrip('0'): v for k, v in HW_MAP.items()}
+# Normalización del mapa: Claves sin ceros iniciales y sin espacios
+CLEAN_MAP = {str(k).strip().upper().lstrip('0'): v for k, v in HW_MAP.items()}
 
-st.set_page_config(page_title="Inventario Huawei", layout="wide")
+def traducir_hardware(row, col_name):
+    if not col_name: return "N/A"
+    pn_raw = str(row.get(col_name, '')).strip().upper()
+    
+    # 1. Extraer la base del PN (quita lo que sigue a un guión o espacio)
+    pn_base = re.split(r'[- ]', pn_raw)[0]
+    
+    # 2. Quitar caracteres no alfanuméricos y ceros iniciales
+    pn_match = re.sub(r'[^A-Z0-9]', '', pn_base).lstrip('0')
+    
+    # 3. Retornar traducción o el PN original si no existe en mapa
+    return CLEAN_MAP.get(pn_match, f"PN: {pn_raw}")
+
+# --- CONFIGURACIÓN DE STREAMLIT ---
+st.set_page_config(page_title="Inventario Huawei Pro", layout="wide")
 st.title("📊 Gestión de Hardware Huawei")
 
-# Selector de archivos multiformato
-file = st.file_uploader("Sube tu inventario (CSV, XLSX o XML)", type=["csv", "xlsx", "xml"])
+file = st.file_uploader("Sube tu archivo (CSV, XLSX o XML)", type=["csv", "xlsx", "xml"])
 
 if file:
     try:
-        # --- LECTURA DE ARCHIVOS ---
+        # LECTURA MULTIFORMATO
         ext = file.name.split('.')[-1].lower()
         if ext == 'csv':
             df = pd.read_csv(file, encoding='latin-1', sep=None, engine='python', dtype=str)
@@ -33,78 +63,73 @@ if file:
         
         df.columns = df.columns.str.strip()
 
-        # --- PROCESAMIENTO ---
-        def traducir_hardware(row):
-            pn_col = next((c for c in df.columns if 'PN' in c or 'BOM' in c), None)
-            if not pn_col: return "N/A"
-            pn_raw = str(row.get(pn_col, '')).strip().upper()
-            pn_base = re.split(r'[- ]', pn_raw)[0]
-            pn_match = re.sub(r'[^A-Z0-9]', '', pn_base).lstrip('0')
-            return CLEAN_MAP.get(pn_match, f"PN: {pn_raw}")
+        # IDENTIFICACIÓN DINÁMICA DE COLUMNAS
+        pn_col = next((c for c in df.columns if 'PN' in c.upper() or 'BOM' in c.upper()), None)
+        sitio_col = next((c for c in df.columns if 'NENAME' in c.upper().replace(" ", "")), "NEName")
+        sn_col = next((c for c in df.columns if 'SN' in c.upper() or 'SERIAL' in c.upper()), None)
 
-        df['Nombre HW'] = df.apply(traducir_hardware, axis=1)
+        # PROCESAMIENTO
+        # Aplicar exclusión de energía según tus reglas
+        if 'Board Name' in df.columns:
+            df = df[~df['Board Name'].str.contains("AC|DC|PWR|POWER|PMU|ETP|DCDU", case=False, na=False)].copy()
+        
+        df['Nombre HW'] = df.apply(lambda r: traducir_hardware(r, pn_col), axis=1)
 
-        # --- CREACIÓN DE PESTAÑAS ---
-        tab1, tab2 = st.tabs(["📈 Dashboard e Inventario", "🔍 Buscador por Serial"])
+        # --- INTERFAZ DE PESTAÑAS ---
+        tab1, tab2 = st.tabs(["📈 Dashboard General", "🔍 Localizador por Serial"])
 
         with tab1:
-            # Tu lógica original de filtrado y gráfico
-            sitio_col = next((c for c in df.columns if 'NEName' in c or 'NE Name' in c), 'NEName')
-            sitio_sel = st.selectbox("📍 Filtrar por Sitio:", ["Todos"] + sorted(df[sitio_col].unique().tolist()))
+            st.subheader("Filtros y Visualización")
+            sitios_disponibles = ["Todos"] + sorted(df[sitio_col].unique().tolist()) if sitio_col in df.columns else ["Todos"]
+            sitio_sel = st.selectbox("📍 Selecciona un Sitio:", sitios_disponibles)
             
-            df_view = df if sitio_sel == "Todos" else df[df[sitio_col] == sitio_sel]
-            
-            conteo = df_view['Nombre HW'].value_counts().reset_index().head(15)
+            df_final = df if sitio_sel == "Todos" else df[df[sitio_col] == sitio_sel]
+
+            # Gráfico de barras
+            conteo = df_final['Nombre HW'].value_counts().reset_index().head(15)
             conteo.columns = ['Hardware', 'Cantidad']
-            st.plotly_chart(px.bar(conteo, x='Cantidad', y='Hardware', orientation='h', color='Cantidad'), use_container_width=True)
-            
-            st.subheader("📋 Detalle de Equipos")
-            st.dataframe(df_view, use_container_width=True)
+            st.plotly_chart(px.bar(conteo, x='Cantidad', y='Hardware', orientation='h', 
+                                   color='Cantidad', color_continuous_scale='Viridis'), use_container_width=True)
 
-       # --- DENTRO DE LA PESTAÑA 2 ---
+            # Detalle en tabla
+            st.subheader("📋 Inventario Detallado")
+            cols_ver = [sitio_col, 'Nombre HW', 'Board Name', 'Subrack No.', 'Slot No.', sn_col]
+            cols_existentes = [c for c in cols_ver if c in df_final.columns]
+            st.dataframe(df_final[cols_existentes], use_container_width=True, hide_index=True)
+
         with tab2:
-            st.subheader("🔍 Localizador de Hardware por Serial")
-            
-            # Identificar columnas clave (por si cambian los nombres en el Excel/XML)
-            sn_col = next((c for c in df.columns if 'SN' in re.sub(r'[^A-Z]', '', c.upper()) or 'SERIAL' in c.upper()), None)
-            slot_col = next((c for c in df.columns if 'Slot' in c), "Slot No.")
-            subrack_col = next((c for c in df.columns if 'Subrack' in c), "Subrack No.")
-            pos_col = next((c for c in df.columns if 'Port' in c or 'Position' in c), "Inventory Unit ID")
-
+            st.subheader("🔎 Buscador de Posición")
             if sn_col:
-                sn_input = st.text_input("Escribe o pega el Serial Number (SN):").strip()
-                
+                sn_input = st.text_input("Ingresa el Serial Number (SN):").strip()
                 if sn_input:
-                    # Buscamos el serial (limpiando espacios)
-                    resultado = df[df[sn_col].str.contains(sn_input, case=False, na=False)]
+                    res = df[df[sn_col].str.contains(sn_input, case=False, na=False)]
                     
-                    if not resultado.empty:
-                        st.success(f"📍 Se encontró {len(resultado)} coincidencia(s)")
-                        
-                        for _, row in resultado.iterrows():
-                            with st.container():
-                                # Diseño de tarjetas para los resultados
-                                col_a, col_b = st.columns([1, 1])
-                                
-                                with col_a:
-                                    st.markdown(f"### 🏗️ {row.get(sitio_col, 'Sitio Desconocido')}")
-                                    st.write(f"**Hardware:** `{row['Nombre HW']}`")
-                                    st.write(f"**Modelo Original:** {row.get('Board Name', 'N/A')}")
-                                
-                                with col_b:
-                                    st.markdown("### 📍 Posición Física")
-                                    st.info(f"""
-                                    **Subrack:** {row.get(subrack_col, 'N/A')}  
-                                    **Slot:** {row.get(slot_col, 'N/A')}  
-                                    **ID Unidad:** {row.get(pos_col, 'N/A')}
-                                    """)
-                                
-                                st.divider()
+                    if not res.empty:
+                        for _, row in res.iterrows():
+                            st.success(f"✅ Coincidencia encontrada en **{row.get(sitio_col, 'N/A')}**")
+                            c1, c2, c3 = st.columns(3)
+                            with c1:
+                                st.write("**Equipo:**")
+                                st.code(row['Nombre HW'])
+                            with c2:
+                                st.write("**Ubicación:**")
+                                st.write(f"Subrack: {row.get('Subrack No.', 'N/A')}")
+                                st.write(f"Slot: {row.get('Slot No.', 'N/A')}")
+                            with c3:
+                                st.write("**ID Unidad:**")
+                                st.write(row.get('Inventory Unit ID', 'N/A'))
+                            st.divider()
                     else:
-                        st.error("No hay registros para ese Serial en este archivo.")
+                        st.error("No se encontró el Serial en la base de datos.")
             else:
-                st.warning("No se pudo identificar la columna de Serial Number en este archivo.")
+                st.warning("No se detectó columna de Serial (SN) en el archivo.")
+
+        # BOTÓN DE DESCARGA
+        st.sidebar.header("Opciones")
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Data')
+        st.sidebar.download_button("📥 Descargar Todo en Excel", output.getvalue(), "Inventario_Procesado.xlsx")
 
     except Exception as e:
-        st.error(f"Error al procesar: {e}")
-
+        st.error(f"Error crítico: {e}")
