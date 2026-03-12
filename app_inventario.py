@@ -61,35 +61,50 @@ if file:
             st.subheader("📋 Detalle de Equipos")
             st.dataframe(df_view, use_container_width=True)
 
+       # --- DENTRO DE LA PESTAÑA 2 ---
         with tab2:
-            st.subheader("🔎 Localizador de Sitios por Serial")
-            st.info("Ingresa el Serial Number (SN) para saber a qué sitio pertenece el equipo.")
+            st.subheader("🔍 Localizador de Hardware por Serial")
             
-            # Identificar la columna de Serial (puede variar según el reporte)
-            sn_col = next((c for c in df.columns if 'SN' in c or 'Serial' in c or 'Bar Code' in c), None)
-            
+            # Identificar columnas clave (por si cambian los nombres en el Excel/XML)
+            sn_col = next((c for c in df.columns if 'SN' in re.sub(r'[^A-Z]', '', c.upper()) or 'SERIAL' in c.upper()), None)
+            slot_col = next((c for c in df.columns if 'Slot' in c), "Slot No.")
+            subrack_col = next((c for c in df.columns if 'Subrack' in c), "Subrack No.")
+            pos_col = next((c for c in df.columns if 'Port' in c or 'Position' in c), "Inventory Unit ID")
+
             if sn_col:
-                sn_input = st.text_input("Introduce el Serial Number:").strip()
+                sn_input = st.text_input("Escribe o pega el Serial Number (SN):").strip()
                 
                 if sn_input:
-                    # Buscamos coincidencias (case insensitive)
+                    # Buscamos el serial (limpiando espacios)
                     resultado = df[df[sn_col].str.contains(sn_input, case=False, na=False)]
                     
                     if not resultado.empty:
-                        for i, row in resultado.iterrows():
-                            st.success(f"✅ **Equipo encontrado:**")
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("Sitio (NEName)", row.get(sitio_col, "No encontrado"))
-                            c2.metric("Hardware", row['Nombre HW'])
-                            c3.metric("Slot / Subrack", f"{row.get('Subrack No.', '0')} / {row.get('Slot No.', '0')}")
-                            
-                            st.write("---")
-                            st.write("**Detalles técnicos completos:**")
-                            st.json(row.to_dict())
+                        st.success(f"📍 Se encontró {len(resultado)} coincidencia(s)")
+                        
+                        for _, row in resultado.iterrows():
+                            with st.container():
+                                # Diseño de tarjetas para los resultados
+                                col_a, col_b = st.columns([1, 1])
+                                
+                                with col_a:
+                                    st.markdown(f"### 🏗️ {row.get(sitio_col, 'Sitio Desconocido')}")
+                                    st.write(f"**Hardware:** `{row['Nombre HW']}`")
+                                    st.write(f"**Modelo Original:** {row.get('Board Name', 'N/A')}")
+                                
+                                with col_b:
+                                    st.markdown("### 📍 Posición Física")
+                                    st.info(f"""
+                                    **Subrack:** {row.get(subrack_col, 'N/A')}  
+                                    **Slot:** {row.get(slot_col, 'N/A')}  
+                                    **ID Unidad:** {row.get(pos_col, 'N/A')}
+                                    """)
+                                
+                                st.divider()
                     else:
-                        st.error("No se encontró ningún equipo con ese Serial en la base de datos.")
+                        st.error("No hay registros para ese Serial en este archivo.")
             else:
-                st.warning("No se encontró una columna de Serial Number en el archivo subido.")
+                st.warning("No se pudo identificar la columna de Serial Number en este archivo.")
 
     except Exception as e:
         st.error(f"Error al procesar: {e}")
+
